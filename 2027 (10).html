@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2027 年員工假期登記系統</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- SheetJS for Excel Export/Import -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .holiday-bg { background-color: #fef2f2 !important; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .calendar-day-num {
+            font-weight: 800 !important;
+            font-size: 0.875rem !important;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- 頂部導覽列 (深色系 Header) -->
+    <header class="bg-slate-900 text-white border-b border-slate-800 shadow-md sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            
+            <!-- 左側：系統標題與圖示 -->
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-calendar-days text-2xl text-amber-400"></i>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                        2027 同事年假登記系統
+                        <span id="sync-badge" class="inline-flex items-center gap-1 text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full border border-slate-700 font-normal">
+                            <span class="w-1.5 h-1.5 rounded-full bg-slate-500 inline-block animate-pulse" id="sync-dot"></span>
+                            <span id="sync-text">雲端連線中...</span>
+                        </span>
+                    </h1>
+                </div>
+            </div>
+
+            <!-- 右側：功能按鈕區 -->
+            <div class="flex items-center flex-wrap gap-2">
+                <button onclick="openBatchModal()" class="bg-amber-400 hover:bg-amber-300 text-slate-950 px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-calendar-plus text-slate-900"></i> 區間請假
+                </button>
+                <button onclick="openDeleteModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border border-slate-700">
+                    <i class="fa-solid fa-trash-can text-rose-400"></i> 刪除已申請假期
+                </button>
+                <button onclick="exportToExcel()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border border-slate-700">
+                    <i class="fa-solid fa-file-export text-emerald-400"></i> 匯出
+                </button>
+                <label class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border border-slate-700 cursor-pointer">
+                    <i class="fa-solid fa-file-import text-blue-400"></i> 匯入
+                    <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="hidden" onchange="importFromExcel(event)">
+                </label>
+                <button onclick="openStatsModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border border-slate-700">
+                    <i class="fa-solid fa-chart-pie text-amber-400"></i> 請假統計
+                </button>
+            </div>
+
+        </div>
+    </header>
+
+    <!-- 主要內容區 -->
+    <main class="max-w-7xl mx-auto w-full px-4 py-6 flex-1 flex flex-col gap-4">
+
+        <!-- 導覽與控制條 (單月/全景視圖皆保留此 Header Bar) -->
+        <div id="single-month-title-bar" class="flex flex-wrap items-center justify-between bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-sm gap-3">
+            
+            <!-- 1. 左側：月份前後切換與當月標題 -->
+            <div class="flex items-center space-x-2">
+                <button onclick="changeMonth(-1)" class="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-100 transition text-slate-600">
+                    <i class="fa-solid fa-chevron-left text-xs"></i>
+                </button>
+                <h2 id="current-month-title" class="text-base font-bold text-slate-800 min-w-[110px] text-center">2027 年 1 月</h2>
+                <button onclick="changeMonth(1)" class="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-100 transition text-slate-600">
+                    <i class="fa-solid fa-chevron-right text-xs"></i>
+                </button>
+            </div>
+
+            <!-- 2. 中間：12 個月切換膠囊按鈕 + 視圖切換器 -->
+            <div class="flex flex-wrap items-center gap-2">
+                <!-- 12 個月快捷膠囊 -->
+                <div class="flex items-center bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar max-w-full">
+                    <div id="quick-month-buttons" class="flex items-center gap-1 min-w-max">
+                        <!-- JS 動態生成 1月至12月 按鈕 -->
+                    </div>
+                </div>
+
+                <!-- 視圖切換器: [ 月視圖 ] [ 全景視圖 ] -->
+                <div class="flex items-center bg-slate-100 p-1 rounded-xl flex-shrink-0">
+                    <button id="tab-month-view" onclick="switchView(false)" class="px-3 py-1 rounded-lg text-xs font-bold transition-all duration-200 bg-amber-400 text-slate-900 shadow-sm">
+                        月視圖
+                    </button>
+                    <button id="tab-full-view" onclick="switchView(true)" class="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition-all duration-200">
+                        全景視圖
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3. 右側：圖例提示 -->
+            <div class="flex items-center gap-3 text-xs font-medium pl-2 border-l border-slate-200">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3.5 h-3.5 rounded border border-slate-300 bg-slate-50 inline-block shadow-inner"></span>
+                    <span class="text-slate-600">週末</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3.5 h-3.5 rounded border border-rose-200 bg-rose-50 inline-block shadow-inner"></span>
+                    <span class="text-rose-600 font-semibold">公眾假期</span>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 單月日曆主體 -->
+        <div id="single-month-view" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            <!-- 星期標頭 -->
+            <div class="grid grid-cols-7 bg-slate-800 text-white text-center font-bold py-2.5 text-sm border-b border-slate-700">
+                <div class="text-rose-400">星期日</div>
+                <div>星期一</div>
+                <div>星期二</div>
+                <div>星期三</div>
+                <div>星期四</div>
+                <div>星期五</div>
+                <div class="text-rose-400">星期六</div>
+            </div>
+            <!-- 日期網格 -->
+            <div id="calendar-grid" class="grid grid-cols-7 border-l border-t border-slate-200 divide-x divide-y divide-slate-200 bg-slate-200 flex-1">
+                <!-- 由 JS 動態生成 -->
+            </div>
+        </div>
+
+        <!-- 全年 12 個月視圖 (預設隱藏) -->
+        <div id="full-year-view" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- 由 JS 動態生成 12 個月 -->
+        </div>
+
+    </main>
+
+    <!-- 1. 單天請假 Modal -->
+    <div id="leave-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 border border-slate-100 relative">
+            <h3 class="text-lg font-bold text-slate-800 mb-1" id="modal-date-title">登記請假</h3>
+            <p class="text-xs text-slate-500 mb-4">請選取或輸入同事姓名，登記全天請假。</p>
+
+            <form id="leave-form" onsubmit="handleSaveLeave(event)" class="space-y-4">
+                <input type="hidden" id="modal-date">
+                
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">同事姓名</label>
+                    <div class="relative">
+                        <input type="text" id="modal-staff-name" required placeholder="點擊選擇或輸入姓名"
+                               onclick="toggleStaffDropdown('modal-staff-dropdown')"
+                               class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-800 focus:outline-none pr-8 text-sm">
+                        <i class="fa-solid fa-chevron-down absolute right-3 top-3 text-slate-400 pointer-events-none text-xs"></i>
+                        <div id="modal-staff-dropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
+                            <!-- JS 動態填入 -->
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">專屬顏色</label>
+                    <input type="color" id="modal-staff-color" value="#3b82f6" class="w-full h-10 p-1 border border-slate-300 rounded-lg cursor-pointer">
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeLeaveModal()" class="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 font-medium text-sm transition">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium text-sm transition shadow-sm">儲存登記</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 2. 區間請假 Modal -->
+    <div id="batch-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 border border-slate-100">
+            <h3 class="text-lg font-bold text-slate-800 mb-4">區間請假登記</h3>
+
+            <form id="batch-form" onsubmit="handleSaveBatchLeave(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">同事姓名</label>
+                    <div class="relative">
+                        <input type="text" id="batch-staff-name" required placeholder="點擊選擇或輸入姓名"
+                               onclick="toggleStaffDropdown('batch-staff-dropdown')"
+                               class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-800 focus:outline-none pr-8 text-sm">
+                        <i class="fa-solid fa-chevron-down absolute right-3 top-3 text-slate-400 pointer-events-none text-xs"></i>
+                        <div id="batch-staff-dropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
+                            <!-- JS 動態填入 -->
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">專屬顏色</label>
+                    <input type="color" id="batch-staff-color" value="#3b82f6" class="w-full h-10 p-1 border border-slate-300 rounded-lg cursor-pointer">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700 mb-1">開始日期</label>
+                        <input type="date" id="batch-start-date" required min="2027-01-01" max="2027-12-31" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700 mb-1">結束日期</label>
+                        <input type="date" id="batch-end-date" required min="2027-01-01" max="2027-12-31" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeBatchModal()" class="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 font-medium text-sm transition">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium text-sm transition shadow-sm">登記</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 3. 刪除已申請假期 Modal -->
+    <div id="delete-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 border border-slate-100 flex flex-col max-h-[85vh]">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <div>
+                    <h3 class="text-lg font-bold text-slate-800">已申請假期列表</h3>
+                    <p class="text-xs text-slate-500">點擊右側刪除按鈕即可直接移除該段假期。</p>
+                </div>
+                <select id="delete-filter-staff" onchange="renderDeleteRangeList()" class="px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm bg-slate-50">
+                    <option value="">所有同事</option>
+                </select>
+            </div>
+
+            <!-- 請假時段清單 -->
+            <div id="delete-range-list" class="py-4 space-y-2 overflow-y-auto flex-1 no-scrollbar">
+                <!-- 由 JS 動態生成 -->
+            </div>
+
+            <div class="pt-3 border-t border-slate-200 flex justify-end">
+                <button type="button" onclick="closeDeleteModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-medium text-sm transition">完成</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. 請假統計 Modal -->
+    <div id="stats-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 border border-slate-100">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">2027 年同事請假統計</h3>
+                <button onclick="closeStatsModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div id="stats-content" class="space-y-3 max-h-60 overflow-y-auto pr-1">
+                <!-- 由 JS 動態生成 -->
+            </div>
+            <div class="pt-4 mt-2 border-t border-slate-200 flex justify-end">
+                <button onclick="closeStatsModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-medium text-sm transition">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. 取消假期確認 Modal -->
+    <div id="confirm-delete-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 border border-slate-100 text-center">
+            <div class="w-12 h-12 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-3 text-xl">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <h3 class="text-lg font-bold text-slate-800 mb-2">確認取消假期？</h3>
+            <p id="confirm-delete-msg" class="text-sm text-slate-600 mb-6">您確定要取消該項請假登記嗎？</p>
+
+            <div class="flex items-center justify-center gap-3">
+                <button type="button" onclick="closeConfirmDeleteModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 font-medium text-sm transition flex-1">
+                    返回
+                </button>
+                <button type="button" id="confirm-delete-btn" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-medium text-sm transition shadow-sm flex-1">
+                    確定取消
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 動態 Toast 提示方塊 -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl transition-all duration-300 transform translate-y-20 opacity-0 z-50 flex items-center gap-2 border border-slate-700">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-emerald-400"></i>
+        <span id="toast-msg" class="text-sm font-medium">操作成功</span>
+    </div>
+
+    <!-- Firebase 11.6.1 模組化載入與核心業務邏輯 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 全域環境變數與您的真實 Firebase 配置整合
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'annualleave-fa7d7';
+        const userFirebaseConfig = {
+            apiKey: "AIzaSyD0ZCViXNEk549sm1eLB4ok1uw1oyVDVCo",
+            authDomain: "annualleave-fa7d7.firebaseapp.com",
+            projectId: "annualleave-fa7d7",
+            storageBucket: "annualleave-fa7d7.firebasestorage.app",
+            messagingSenderId: "730632476565",
+            appId: "1:730632476565:web:f70ef2b8090f9e6a3a489c",
+            measurementId: "G-Z4RYJWQHZ3"
+        };
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
+
+        // 初始化 Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // 2027 年澳門官方假期資料庫
+        const macauHolidays2027 = {
+            "2027-01-01": { name: "元旦" },
+            "2027-02-05": { name: "農曆除夕 (下午豁免)" },
+            "2027-02-06": { name: "農曆正月初一" },
+            "2027-02-07": { name: "農曆正月初二" },
+            "2027-02-08": { name: "農曆正月初三" },
+            "2027-02-09": { name: "農曆正月初一補假" },
+            "2027-02-10": { name: "農曆正月初二補假" },
+            "2027-03-26": { name: "耶穌受難日" },
+            "2027-03-27": { name: "復活節前日" },
+            "2027-03-29": { name: "復活節前日補假" },
+            "2027-04-05": { name: "清明節" },
+            "2027-05-01": { name: "勞動節" },
+            "2027-05-03": { name: "勞動節補假" },
+            "2027-05-13": { name: "佛誕節" },
+            "2027-06-09": { name: "端午節" },
+            "2027-09-16": { name: "中秋節翌日" },
+            "2027-10-01": { name: "中華人民共和國國慶日" },
+            "2027-10-02": { name: "國慶日翌日" },
+            "2027-10-04": { name: "中華人民共和國國慶日翌日補假" },
+            "2027-10-08": { name: "重陽節" },
+            "2027-11-02": { name: "追思節" },
+            "2027-12-08": { name: "聖母無原罪瞻禮" },
+            "2027-12-20": { name: "澳門特別行政區成立紀念日" },
+            "2027-12-22": { name: "冬至" },
+            "2027-12-24": { name: "聖誕節前日" },
+            "2027-12-25": { name: "聖誕節" },
+            "2027-12-27": { name: "聖誕節補假" },
+            "2027-12-31": { name: "除夕 (下午豁免)" }
+        };
+
+        const defaultColorPalette = [
+            "#3b82f6", "#10b981", "#8b5cf6", "#f97316", "#ec4899", 
+            "#06b6d4", "#eab308", "#ef4444", "#14b8a6", "#6366f1"
+        ];
+
+        let currentYear = 2027;
+        let currentMonth = 0; // 0 代表 1 月
+        let isFullYearView = false;
+        let pendingDeleteData = null;
+        let leaveData = {};
+        let staffColors = {};
+        let isCloudConnected = false;
+
+        // 遵循 Rule 1 的 Firestore 文件路徑
+        const scheduleDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'leave_system', '2027');
+
+        function normalizeHex(colorStr) {
+            if (!colorStr) return "#3b82f6";
+            if (colorStr.startsWith("#")) {
+                let hex = colorStr.slice(1);
+                if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+                return `#${hex.toLowerCase()}`;
+            }
+            return colorStr.toLowerCase();
+        }
+
+        function getUnusedColor() {
+            const usedColors = Object.values(staffColors).map(c => normalizeHex(c));
+            for (let color of defaultColorPalette) {
+                const normalizedColor = normalizeHex(color);
+                if (!usedColors.includes(normalizedColor)) return normalizedColor;
+            }
+            return "#3b82f6";
+        }
+
+        // 初始化驗證與資料監聽
+        async function initAuthAndFirestore() {
+            try {
+                // Rule 3: 先驗證身份再讀寫
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                updateSyncState(true, "雲端已同步");
+
+                // 實時數據監聽 (Real-time listener)
+                onSnapshot(scheduleDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        leaveData = data.leaveData || {};
+                        staffColors = data.staffColors || {};
+                        saveToLocalStorage(); // 同步備份至 Local Storage
+                        refreshViews();
+                    } else {
+                        // 如果雲端尚無紀錄，寫入初始內容
+                        saveToCloud();
+                    }
+                }, (error) => {
+                    console.warn("Firestore listener warning/error:", error);
+                    updateSyncState(false, "離線模式 (Local)");
+                    loadFromLocalStorage();
+                    refreshViews();
+                });
+
+            } catch (err) {
+                console.warn("Auth/Connection exception:", err);
+                updateSyncState(false, "離線模式 (Local)");
+                loadFromLocalStorage();
+                refreshViews();
+            }
+        }
+
+        function updateSyncState(connected, text) {
+            isCloudConnected = connected;
+            const dot = document.getElementById("sync-dot");
+            const textEl = document.getElementById("sync-text");
+            if (dot && textEl) {
+                textEl.textContent = text;
+                if (connected) {
+                    dot.className = "w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block";
+                } else {
+                    dot.className = "w-1.5 h-1.5 rounded-full bg-amber-400 inline-block animate-ping";
+                }
+            }
+        }
+
+        // 寫入雲端 Firestore
+        async function saveToCloud() {
+            saveToLocalStorage(); // 本地離線備份
+            if (auth.currentUser) {
+                try {
+                    await setDoc(scheduleDocRef, {
+                        leaveData: leaveData,
+                        staffColors: staffColors,
+                        updatedAt: new Date().toISOString()
+                    }, { merge: true });
+                } catch (e) {
+                    console.error("Cloud save error:", e);
+                }
+            }
+        }
+
+        function saveToLocalStorage() {
+            localStorage.setItem("leaveData_2027", JSON.stringify(leaveData));
+            localStorage.setItem("staffColors_2027", JSON.stringify(staffColors));
+        }
+
+        function loadFromLocalStorage() {
+            const savedData = localStorage.getItem("leaveData_2027");
+            const savedColors = localStorage.getItem("staffColors_2027");
+            if (savedData) leaveData = JSON.parse(savedData);
+            if (savedColors) staffColors = JSON.parse(savedColors);
+        }
+
+        function refreshViews() {
+            if (isFullYearView) renderFullYearCalendar();
+            else renderCalendar();
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            loadFromLocalStorage();
+            initQuickMonthButtons();
+            renderCalendar();
+
+            document.addEventListener("click", (e) => {
+                if (!e.target.closest('#modal-staff-name') && !e.target.closest('#modal-staff-dropdown')) {
+                    document.getElementById('modal-staff-dropdown')?.classList.add('hidden');
+                }
+                if (!e.target.closest('#batch-staff-name') && !e.target.closest('#batch-staff-dropdown')) {
+                    document.getElementById('batch-staff-dropdown')?.classList.add('hidden');
+                }
+            });
+
+            setupColorAutoSync('modal-staff-name', 'modal-staff-color');
+            setupColorAutoSync('batch-staff-name', 'batch-staff-color');
+
+            // 開始雲端同步
+            initAuthAndFirestore();
+        });
+
+        function setupColorAutoSync(inputId, colorPickerId) {
+            const input = document.getElementById(inputId);
+            const colorPicker = document.getElementById(colorPickerId);
+            if (!input || !colorPicker) return;
+
+            input.addEventListener("input", (e) => {
+                const name = e.target.value.trim();
+                if (name && staffColors[name]) {
+                    colorPicker.value = normalizeHex(staffColors[name]);
+                } else if (name) {
+                    colorPicker.value = getUnusedColor();
+                }
+            });
+        }
+
+        function toggleStaffDropdown(dropdownId) {
+            const dropdown = document.getElementById(dropdownId);
+            if (!dropdown) return;
+            
+            const isModal = dropdownId === 'modal-staff-dropdown';
+            const inputId = isModal ? 'modal-staff-name' : 'batch-staff-name';
+            const colorId = isModal ? 'modal-staff-color' : 'batch-staff-color';
+
+            dropdown.innerHTML = "";
+            const staffNames = Object.keys(staffColors);
+
+            if (staffNames.length === 0) {
+                dropdown.classList.add('hidden');
+                return;
+            }
+
+            staffNames.forEach(name => {
+                const item = document.createElement('div');
+                item.className = 'px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 cursor-pointer flex items-center justify-between';
+                item.innerHTML = `
+                    <span>${name}</span>
+                    <span class="w-3 h-3 rounded-full" style="background-color: ${staffColors[name]}"></span>
+                `;
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    document.getElementById(inputId).value = name;
+                    document.getElementById(colorId).value = normalizeHex(staffColors[name]);
+                    dropdown.classList.add('hidden');
+                };
+                dropdown.appendChild(item);
+            });
+
+            dropdown.classList.toggle('hidden');
+        }
+
+        function initQuickMonthButtons() {
+            const container = document.getElementById("quick-month-buttons");
+            container.innerHTML = "";
+            for (let m = 0; m < 12; m++) {
+                const btn = document.createElement("button");
+                btn.className = `px-3.5 py-1 rounded-xl text-xs font-semibold transition-all duration-150 flex-shrink-0 ${
+                    m === currentMonth && !isFullYearView 
+                        ? 'bg-slate-900 text-white shadow-sm font-bold' 
+                        : 'text-slate-600 hover:bg-slate-200/80 hover:text-slate-900'
+                }`;
+                btn.textContent = `${m + 1}月`;
+                btn.onclick = () => {
+                    currentMonth = m;
+                    if (isFullYearView) {
+                        switchView(false);
+                    } else {
+                        updateQuickMonthButtons();
+                        renderCalendar();
+                    }
+                };
+                container.appendChild(btn);
+            }
+        }
+
+        function updateQuickMonthButtons() {
+            const btns = document.getElementById("quick-month-buttons").children;
+            for (let m = 0; m < 12; m++) {
+                if (btns[m]) {
+                    btns[m].className = `px-3.5 py-1 rounded-xl text-xs font-semibold transition-all duration-150 flex-shrink-0 ${
+                        m === currentMonth && !isFullYearView 
+                            ? 'bg-slate-900 text-white shadow-sm font-bold' 
+                            : 'text-slate-600 hover:bg-slate-200/80 hover:text-slate-900'
+                    }`;
+                }
+            }
+        }
+
+        function switchView(showFullYear) {
+            isFullYearView = showFullYear;
+            
+            const btnMonth = document.getElementById("tab-month-view");
+            const btnFull = document.getElementById("tab-full-view");
+            const titleBar = document.getElementById("single-month-title-bar");
+            const singleView = document.getElementById("single-month-view");
+            const fullView = document.getElementById("full-year-view");
+
+            titleBar.classList.remove("hidden");
+
+            if (isFullYearView) {
+                btnFull.className = "px-3 py-1 rounded-lg text-xs font-bold transition-all duration-200 bg-amber-400 text-slate-900 shadow-sm";
+                btnMonth.className = "px-3 py-1 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition-all duration-200";
+                
+                singleView.classList.add("hidden");
+                fullView.classList.remove("hidden");
+                renderFullYearCalendar();
+            } else {
+                btnMonth.className = "px-3 py-1 rounded-lg text-xs font-bold transition-all duration-200 bg-amber-400 text-slate-900 shadow-sm";
+                btnFull.className = "px-3 py-1 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition-all duration-200";
+
+                singleView.classList.remove("hidden");
+                fullView.classList.add("hidden");
+                renderCalendar();
+            }
+            updateQuickMonthButtons();
+        }
+
+        function renderCalendar() {
+            const grid = document.getElementById("calendar-grid");
+            const title = document.getElementById("current-month-title");
+            if (!grid || !title) return;
+
+            grid.innerHTML = "";
+            title.textContent = `${currentYear} 年 ${currentMonth + 1} 月`;
+
+            const firstDay = new Date(currentYear, currentMonth, 1).getDay();
+            const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+            let allCellsData = [];
+            for (let i = 0; i < firstDay; i++) {
+                allCellsData.push({ type: 'empty' });
+            }
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                const dateObj = new Date(currentYear, currentMonth, d);
+                const dayOfWeek = dateObj.getDay();
+                const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+                const holiday = macauHolidays2027[dateStr];
+                const todayLeaves = leaveData[dateStr] || [];
+
+                allCellsData.push({
+                    type: 'day',
+                    dateStr,
+                    dayNum: d,
+                    isWeekend,
+                    holiday,
+                    todayLeaves
+                });
+            }
+
+            const weeks = [];
+            for (let i = 0; i < allCellsData.length; i += 7) {
+                weeks.push(allCellsData.slice(i, i + 7));
+            }
+
+            weeks.forEach(week => {
+                const weekStaffSet = new Set();
+                week.forEach(cell => {
+                    if (cell.type === 'day' && cell.todayLeaves) {
+                        cell.todayLeaves.forEach(l => weekStaffSet.add(l.staff.toLowerCase().trim()));
+                    }
+                });
+                const weekStaffList = Array.from(weekStaffSet).sort();
+
+                week.forEach(cell => {
+                    if (cell.type === 'empty') {
+                        const emptyCell = document.createElement("div");
+                        emptyCell.className = "bg-slate-50/50 p-1 min-h-[110px]";
+                        grid.appendChild(emptyCell);
+                    } else {
+                        const { dateStr, dayNum, isWeekend, holiday, todayLeaves } = cell;
+                        const cellDiv = document.createElement("div");
+                        cellDiv.setAttribute("onclick", `openLeaveModal('${dateStr}')`);
+                        cellDiv.className = `p-1.5 min-h-[110px] flex flex-col justify-between transition cursor-pointer hover:bg-slate-50/90 relative border-b border-r border-slate-200 bg-white group ${holiday ? 'holiday-bg' : (isWeekend ? 'bg-slate-50/70' : '')}`;
+
+                        let headerHtml = `
+                            <div class="flex items-center justify-between mb-1">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="calendar-day-num text-slate-900">${dayNum}</span>
+                                    <span class="w-4 h-4 rounded-full bg-slate-100 group-hover:bg-slate-800 group-hover:text-white text-slate-400 flex items-center justify-center text-[10px] transition-colors" title="登記請假">+</span>
+                                </div>
+                                ${holiday ? `<span class="text-[10px] font-semibold text-rose-600 bg-rose-100/80 px-1.5 py-0.5 rounded leading-tight text-right">${holiday.name}</span>` : ''}
+                            </div>
+                        `;
+
+                        const leafMap = {};
+                        todayLeaves.forEach(l => {
+                            leafMap[l.staff.toLowerCase().trim()] = l;
+                        });
+
+                        let maxActiveIndex = -1;
+                        weekStaffList.forEach((staff, sIdx) => {
+                            if (leafMap[staff]) maxActiveIndex = sIdx;
+                        });
+
+                        let leavesHtml = `<div class="space-y-1 flex-1">`;
+                        if (maxActiveIndex >= 0) {
+                            for (let i = 0; i <= maxActiveIndex; i++) {
+                                const staff = weekStaffList[i];
+                                const leaf = leafMap[staff];
+                                if (leaf) {
+                                    leavesHtml += `
+                                        <div onclick="event.stopPropagation(); openConfirmDeleteModal('${dateStr}', '${leaf.staff}')"
+                                             class="text-xs font-semibold px-2 py-1 rounded text-white shadow-sm flex items-center justify-between group/item hover:opacity-90 transition h-[24px]"
+                                             style="background-color: ${leaf.color}" title="點擊取消年假">
+                                            <span class="truncate">${leaf.staff}</span>
+                                            <i class="fa-solid fa-xmark text-[10px] opacity-0 group-hover/item:opacity-100 transition-opacity"></i>
+                                        </div>
+                                    `;
+                                } else {
+                                    leavesHtml += `<div class="h-[24px]"></div>`;
+                                }
+                            }
+                        }
+                        leavesHtml += `</div>`;
+
+                        cellDiv.innerHTML = headerHtml + leavesHtml;
+                        grid.appendChild(cellDiv);
+                    }
+                });
+            });
+        }
+
+        function renderFullYearCalendar() {
+            const container = document.getElementById("full-year-view");
+            if (!container) return;
+            container.innerHTML = "";
+
+            for (let m = 0; m < 12; m++) {
+                const monthCard = document.createElement("div");
+                monthCard.className = "bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col";
+
+                const firstDay = new Date(currentYear, m, 1).getDay();
+                const daysInMonth = new Date(currentYear, m + 1, 0).getDate();
+
+                let gridCells = "";
+                for (let i = 0; i < firstDay; i++) {
+                    gridCells += `<div class="bg-slate-50/50 p-0.5 min-h-[45px]"></div>`;
+                }
+
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${currentYear}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const dateObj = new Date(currentYear, m, d);
+                    const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6);
+                    const holiday = macauHolidays2027[dateStr];
+                    const todayLeaves = leaveData[dateStr] || [];
+
+                    let leafBars = "";
+                    todayLeaves.forEach(leaf => {
+                        leafBars += `<div class="h-1.5 rounded-full w-full" style="background-color: ${leaf.color}"></div>`;
+                    });
+
+                    gridCells += `
+                        <div onclick="openLeaveModal('${dateStr}')" class="p-1 min-h-[45px] border-b border-r border-slate-100 flex flex-col justify-between cursor-pointer hover:bg-slate-100/80 transition ${holiday ? 'holiday-bg' : (isWeekend ? 'bg-slate-50' : '')}">
+                            <div class="flex items-center justify-between">
+                                <span class="calendar-day-num text-slate-900" style="font-size: 11px !important;">${d}</span>
+                            </div>
+                            <div class="space-y-0.5">${leafBars}</div>
+                        </div>
+                    `;
+                }
+
+                monthCard.innerHTML = `
+                    <div class="bg-slate-800 text-white font-bold px-3 py-2 text-sm flex items-center justify-between">
+                        <span>2027 年 ${m + 1} 月</span>
+                        <button onclick="zoomToMonth(${m})" class="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded text-amber-300 font-semibold">進入單月</button>
+                    </div>
+                    <div class="grid grid-cols-7 bg-slate-100 text-center font-medium py-1 text-[11px] text-slate-600 border-b border-slate-200">
+                        <div class="text-rose-500">日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-rose-500">六</div>
+                    </div>
+                    <div class="grid grid-cols-7 divide-x divide-y divide-slate-100 text-xs">
+                        ${gridCells}
+                    </div>
+                `;
+                container.appendChild(monthCard);
+            }
+        }
+
+        function zoomToMonth(m) {
+            currentMonth = m;
+            switchView(false);
+        }
+
+        function changeMonth(delta) {
+            currentMonth += delta;
+            if (currentMonth < 0) currentMonth = 11;
+            if (currentMonth > 11) currentMonth = 0;
+            if (isFullYearView) {
+                switchView(false);
+            } else {
+                updateQuickMonthButtons();
+                renderCalendar();
+            }
+        }
+
+        function cleanUnusedStaff() {
+            const activeStaffSet = new Set();
+            Object.keys(leaveData).forEach(dateStr => {
+                if (leaveData[dateStr] && leaveData[dateStr].length > 0) {
+                    leaveData[dateStr].forEach(item => {
+                        activeStaffSet.add(item.staff.toLowerCase().trim());
+                    });
+                } else {
+                    delete leaveData[dateStr];
+                }
+            });
+
+            Object.keys(staffColors).forEach(name => {
+                if (!activeStaffSet.has(name.toLowerCase().trim())) {
+                    delete staffColors[name];
+                }
+            });
+        }
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById("toast");
+            const icon = document.getElementById("toast-icon");
+            const msgEl = document.getElementById("toast-msg");
+
+            msgEl.textContent = msg;
+            icon.className = isError ? "fa-solid fa-triangle-exclamation text-rose-400" : "fa-solid fa-circle-check text-emerald-400";
+            toast.classList.remove("translate-y-20", "opacity-0");
+
+            setTimeout(() => {
+                toast.classList.add("translate-y-20", "opacity-0");
+            }, 3000);
+        }
+
+        function openLeaveModal(dateStr) {
+            document.getElementById("modal-date").value = dateStr;
+            document.getElementById("modal-date-title").textContent = `登記請假 - ${dateStr}`;
+            document.getElementById("modal-staff-name").value = "";
+            document.getElementById("modal-staff-color").value = getUnusedColor();
+            document.getElementById("leave-modal").classList.remove("hidden");
+        }
+
+        function closeLeaveModal() {
+            document.getElementById("leave-modal").classList.add("hidden");
+        }
+
+        function openBatchModal() {
+            document.getElementById("batch-staff-name").value = "";
+            document.getElementById("batch-staff-color").value = getUnusedColor();
+            document.getElementById("batch-start-date").value = "2027-01-01";
+            document.getElementById("batch-end-date").value = "2027-01-05";
+            document.getElementById("batch-modal").classList.remove("hidden");
+        }
+
+        function closeBatchModal() {
+            document.getElementById("batch-modal").classList.add("hidden");
+        }
+
+        async function handleSaveLeave(e) {
+            e.preventDefault();
+            const dateStr = document.getElementById("modal-date").value;
+            const staffName = document.getElementById("modal-staff-name").value.trim();
+            const color = document.getElementById("modal-staff-color").value;
+
+            if (!staffName) return;
+
+            staffColors[staffName] = color;
+            if (!leaveData[dateStr]) leaveData[dateStr] = [];
+
+            leaveData[dateStr] = leaveData[dateStr].filter(l => l.staff.toLowerCase().trim() !== staffName.toLowerCase());
+            leaveData[dateStr].push({ id: Date.now().toString(), staff: staffName, color: color });
+
+            await saveToCloud();
+            closeLeaveModal();
+            showToast(`已成功登記 ${staffName} 於 ${dateStr} 之假期！`);
+            refreshViews();
+        }
+
+        async function handleSaveBatchLeave(e) {
+            e.preventDefault();
+            const staffName = document.getElementById("batch-staff-name").value.trim();
+            const color = document.getElementById("batch-staff-color").value;
+            const startStr = document.getElementById("batch-start-date").value;
+            const endStr = document.getElementById("batch-end-date").value;
+
+            if (!staffName || !startStr || !endStr) return;
+
+            const startDate = new Date(startStr);
+            const endDate = new Date(endStr);
+
+            if (startDate > endDate) {
+                showToast("開始日期不能晚於結束日期！", true);
+                return;
+            }
+
+            staffColors[staffName] = color;
+            let curr = new Date(startDate);
+            let addedCount = 0;
+
+            while (curr <= endDate) {
+                const dateStr = curr.toISOString().split('T')[0];
+                if (!leaveData[dateStr]) leaveData[dateStr] = [];
+
+                leaveData[dateStr] = leaveData[dateStr].filter(l => l.staff.toLowerCase().trim() !== staffName.toLowerCase());
+                leaveData[dateStr].push({ id: `${Date.now()}_${Math.random()}`, staff: staffName, color: color });
+
+                addedCount++;
+                curr.setDate(curr.getDate() + 1);
+            }
+
+            await saveToCloud();
+            closeBatchModal();
+            showToast(`已成功為 ${staffName} 批量登記 ${addedCount} 天假期！`);
+            refreshViews();
+        }
+
+        function openDeleteModal() {
+            const select = document.getElementById("delete-filter-staff");
+            select.innerHTML = '<option value="">所有同事</option>';
+            Object.keys(staffColors).forEach(name => {
+                select.innerHTML += `<option value="${name}">${name}</option>`;
+            });
+
+            renderDeleteRangeList();
+            document.getElementById("delete-modal").classList.remove("hidden");
+        }
+
+        function closeDeleteModal() {
+            document.getElementById("delete-modal").classList.add("hidden");
+        }
+
+        function renderDeleteRangeList() {
+            const listEl = document.getElementById("delete-range-list");
+            const filterStaff = document.getElementById("delete-filter-staff").value.toLowerCase();
+            listEl.innerHTML = "";
+
+            const rawLeaves = [];
+            Object.keys(leaveData).forEach(dateStr => {
+                leaveData[dateStr].forEach(leaf => {
+                    if (!filterStaff || leaf.staff.toLowerCase() === filterStaff) {
+                        rawLeaves.push({ date: dateStr, ...leaf });
+                    }
+                });
+            });
+
+            if (rawLeaves.length === 0) {
+                listEl.innerHTML = `<div class="p-6 text-center text-slate-400 text-sm">尚無請假記錄</div>`;
+                return;
+            }
+
+            rawLeaves.sort((a, b) => {
+                const staffCompare = a.staff.toLowerCase().localeCompare(b.staff.toLowerCase());
+                if (staffCompare !== 0) return staffCompare;
+                return a.date.localeCompare(b.date);
+            });
+
+            const ranges = [];
+            rawLeaves.forEach(item => {
+                const lastRange = ranges[ranges.length - 1];
+                const itemDate = new Date(item.date);
+
+                if (lastRange && lastRange.staff.toLowerCase() === item.staff.toLowerCase()) {
+                    const lastEnd = new Date(lastRange.endDate);
+                    const diffDays = Math.round((itemDate - lastEnd) / (1000 * 3600 * 24));
+                    if (diffDays === 1) {
+                        lastRange.endDate = item.date;
+                        lastRange.dates.push(item.date);
+                        return;
+                    }
+                }
+
+                ranges.push({
+                    staff: item.staff,
+                    color: item.color || staffColors[item.staff] || '#3b82f6',
+                    startDate: item.date,
+                    endDate: item.date,
+                    dates: [item.date]
+                });
+            });
+
+            ranges.forEach(range => {
+                const daysCount = range.dates.length;
+                const dateText = range.startDate === range.endDate ? range.startDate : `${range.startDate} 至 ${range.endDate}`;
+
+                const row = document.createElement("div");
+                row.className = "flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg hover:border-slate-300 transition";
+                row.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="w-3.5 h-3.5 rounded-full flex-shrink-0" style="background-color: ${range.color}"></span>
+                        <div>
+                            <div class="font-bold text-slate-800 text-sm">${range.staff}</div>
+                            <div class="text-xs text-slate-500">${dateText} <span class="text-slate-400">(${daysCount} 天)</span></div>
+                        </div>
+                    </div>
+                    <button onclick="confirmDeleteLeaveRange('${range.staff}', '${range.startDate}', '${range.endDate}', ${daysCount})"
+                            class="px-3 py-1 bg-rose-100 hover:bg-rose-200 text-rose-600 rounded-md text-xs font-semibold transition">
+                        刪除
+                    </button>
+                `;
+                listEl.appendChild(row);
+            });
+        }
+
+        function openConfirmDeleteModal(dateStr, staffName) {
+            pendingDeleteData = { type: 'single', dateStr, staffName };
+            const msgEl = document.getElementById("confirm-delete-msg");
+            if (msgEl) {
+                msgEl.innerHTML = `確定要取消 <strong class="text-slate-800">${staffName}</strong> 於 <span class="font-semibold text-blue-600">${dateStr}</span> 的假期嗎？`;
+            }
+            const confirmBtn = document.getElementById("confirm-delete-btn");
+            if (confirmBtn) {
+                confirmBtn.onclick = () => executeDeleteSingleLeave();
+            }
+            document.getElementById("confirm-delete-modal")?.classList.remove("hidden");
+        }
+
+        function closeConfirmDeleteModal() {
+            document.getElementById("confirm-delete-modal")?.classList.add("hidden");
+            pendingDeleteData = null;
+        }
+
+        function confirmDeleteLeaveRange(staffName, startDateStr, endDateStr, daysCount) {
+            const dateText = startDateStr === endDateStr ? startDateStr : `${startDateStr} 至 ${endDateStr}`;
+            pendingDeleteData = { type: 'range', staffName, startDateStr, endDateStr };
+
+            const msgEl = document.getElementById("confirm-delete-msg");
+            if (msgEl) {
+                msgEl.innerHTML = `確定要刪除 <strong class="text-slate-800">${staffName}</strong> 於 <span class="font-semibold text-blue-600">${dateText}</span> (${daysCount} 天) 的假期嗎？`;
+            }
+
+            const confirmBtn = document.getElementById("confirm-delete-btn");
+            if (confirmBtn) {
+                confirmBtn.onclick = () => executeDeleteLeaveRange();
+            }
+
+            document.getElementById("confirm-delete-modal")?.classList.remove("hidden");
+        }
+
+        async function executeDeleteLeaveRange() {
+            if (!pendingDeleteData || pendingDeleteData.type !== 'range') return;
+            const { staffName, startDateStr, endDateStr } = pendingDeleteData;
+
+            let curr = new Date(startDateStr);
+            const endDate = new Date(endDateStr);
+            let deletedDays = 0;
+
+            while (curr <= endDate) {
+                const dateStr = curr.toISOString().split('T')[0];
+                if (leaveData[dateStr]) {
+                    leaveData[dateStr] = leaveData[dateStr].filter(l => l.staff.toLowerCase().trim() !== staffName.toLowerCase().trim());
+                    if (leaveData[dateStr].length === 0) delete leaveData[dateStr];
+                    deletedDays++;
+                }
+                curr.setDate(curr.getDate() + 1);
+            }
+
+            cleanUnusedStaff();
+            await saveToCloud();
+            closeConfirmDeleteModal();
+            renderDeleteRangeList();
+            showToast(`已成功刪除 ${staffName} 共 ${deletedDays} 天的請假區間！`);
+            refreshViews();
+        }
+
+        async function executeDeleteSingleLeave() {
+            if (!pendingDeleteData) return;
+            const { dateStr, staffName } = pendingDeleteData;
+
+            if (leaveData[dateStr]) {
+                leaveData[dateStr] = leaveData[dateStr].filter(l => l.staff.toLowerCase().trim() !== staffName.toLowerCase().trim());
+                if (leaveData[dateStr].length === 0) delete leaveData[dateStr];
+
+                cleanUnusedStaff();
+                await saveToCloud();
+                closeConfirmDeleteModal();
+                showToast(`已成功取消 ${staffName} 於 ${dateStr} 之年假！`);
+                refreshViews();
+            }
+        }
+
+        function openStatsModal() {
+            const content = document.getElementById("stats-content");
+            content.innerHTML = "";
+
+            const stats = {};
+            Object.keys(leaveData).forEach(dateStr => {
+                const currentDate = new Date(dateStr);
+                const dayOfWeek = currentDate.getDay();
+                const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+                const holiday = macauHolidays2027[dateStr];
+                const isFullDayHoliday = holiday && !holiday.name.includes("下午豁免");
+
+                if (!isWeekend && !isFullDayHoliday) {
+                    leaveData[dateStr].forEach(l => {
+                        const name = l.staff;
+                        stats[name] = (stats[name] || 0) + 1;
+                    });
+                }
+            });
+
+            const keys = Object.keys(stats);
+            if (keys.length === 0) {
+                content.innerHTML = '<div class="text-center text-slate-400 py-6 text-sm">尚無工作日請假記錄</div>';
+            } else {
+                keys.forEach(name => {
+                    const row = document.createElement("div");
+                    row.className = "flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg";
+                    row.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 rounded-full" style="background-color: ${staffColors[name] || '#3b82f6'}"></span>
+                            <span class="font-bold text-slate-700 text-sm">${name}</span>
+                        </div>
+                        <span class="text-sm font-semibold text-blue-600">${stats[name]} 天</span>
+                    `;
+                    content.appendChild(row);
+                });
+            }
+
+            document.getElementById("stats-modal").classList.remove("hidden");
+        }
+
+        function closeStatsModal() {
+            document.getElementById("stats-modal").classList.add("hidden");
+        }
+
+        function exportToExcel() {
+            const rawLeaves = [];
+            Object.keys(leaveData).forEach(dateStr => {
+                leaveData[dateStr].forEach(leaf => {
+                    rawLeaves.push({ date: dateStr, staff: leaf.staff });
+                });
+            });
+
+            if (rawLeaves.length === 0) {
+                showToast("目前尚無請假資料可供匯出！", true);
+                return;
+            }
+
+            rawLeaves.sort((a, b) => {
+                const staffCompare = a.staff.toLowerCase().localeCompare(b.staff.toLowerCase());
+                if (staffCompare !== 0) return staffCompare;
+                return a.date.localeCompare(b.date);
+            });
+
+            const ranges = [];
+            rawLeaves.forEach(item => {
+                const lastRange = ranges[ranges.length - 1];
+                const itemDate = new Date(item.date);
+
+                if (lastRange && lastRange["姓名"].toLowerCase() === item.staff.toLowerCase()) {
+                    const lastEnd = new Date(lastRange["結束日"]);
+                    const diffDays = Math.round((itemDate - lastEnd) / (1000 * 3600 * 24));
+                    if (diffDays === 1) {
+                        lastRange["結束日"] = item.date;
+                        lastRange["日數"] += 1;
+                        return;
+                    }
+                }
+
+                ranges.push({
+                    "姓名": item.staff,
+                    "開始日": item.date,
+                    "結束日": item.date,
+                    "日數": 1
+                });
+            });
+
+            const worksheet = XLSX.utils.json_to_sheet(ranges);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "2027請假明細");
+            XLSX.writeFile(workbook, "2027_Staff_Leave_Schedule.xlsx");
+            showToast("匯出成功！");
+        }
+
+        function importFromExcel(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+                    leaveData = {};
+                    rows.forEach(r => {
+                        const staff = r["姓名"];
+                        const startStr = r["開始日"];
+                        const endStr = r["結束日"] || startStr;
+
+                        if (staff && startStr) {
+                            const startDate = new Date(startStr);
+                            const endDate = new Date(endStr);
+
+                            if (!isNaN(startDate) && !isNaN(endDate)) {
+                                let curr = new Date(startDate);
+                                while (curr <= endDate) {
+                                    const dateStr = curr.toISOString().split('T')[0];
+                                    if (!leaveData[dateStr]) leaveData[dateStr] = [];
+
+                                    const color = staffColors[staff] || "#3b82f6";
+                                    staffColors[staff] = color;
+
+                                    leaveData[dateStr] = leaveData[dateStr].filter(l => l.staff.toLowerCase() !== staff.toLowerCase());
+                                    leaveData[dateStr].push({
+                                        id: `${Date.now()}_${Math.random()}`,
+                                        staff: staff,
+                                        color: color
+                                    });
+
+                                    curr.setDate(curr.getDate() + 1);
+                                }
+                            }
+                        }
+                    });
+
+                    await saveToCloud();
+                    showToast("匯入並同步成功！");
+                    refreshViews();
+
+                } catch (err) {
+                    showToast("讀取檔案失敗，請確認格式是否正確！", true);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // 綁定全域 window 函數以便 HTML onclick 直接調用
+        window.openBatchModal = openBatchModal;
+        window.closeBatchModal = closeBatchModal;
+        window.openDeleteModal = openDeleteModal;
+        window.closeDeleteModal = closeDeleteModal;
+        window.exportToExcel = exportToExcel;
+        window.importFromExcel = importFromExcel;
+        window.openStatsModal = openStatsModal;
+        window.closeStatsModal = closeStatsModal;
+        window.switchView = switchView;
+        window.changeMonth = changeMonth;
+        window.zoomToMonth = zoomToMonth;
+        window.openLeaveModal = openLeaveModal;
+        window.closeLeaveModal = closeLeaveModal;
+        window.handleSaveLeave = handleSaveLeave;
+        window.handleSaveBatchLeave = handleSaveBatchLeave;
+        window.renderDeleteRangeList = renderDeleteRangeList;
+        window.confirmDeleteLeaveRange = confirmDeleteLeaveRange;
+        window.openConfirmDeleteModal = openConfirmDeleteModal;
+        window.closeConfirmDeleteModal = closeConfirmDeleteModal;
+        window.toggleStaffDropdown = toggleStaffDropdown;
+    </script>
+</body>
+</html>
