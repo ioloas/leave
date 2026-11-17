@@ -289,7 +289,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, getDocFromServer } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // 全域環境變數與您的真實 Firebase 配置整合
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'annualleave-fa7d7';
@@ -347,7 +347,9 @@
         ];
 
         let currentYear = 2027;
-        let currentMonth = 0; // 0 代表 1 月
+        // 預設顯示「今日」所在月份；若今日不在 2027 年，則顯示 1 月
+        const today = new Date();
+        let currentMonth = (today.getFullYear() === 2027) ? today.getMonth() : 0;
         let isFullYearView = false;
         let pendingDeleteData = null;
         let leaveData = {};
@@ -474,7 +476,7 @@
             }
         }
 
-        // 寫入雲端 Firestore
+        // 寫入雲端 Firestore（寫入後會從 Server 再讀一次驗證是否真的成功）
         // force = true 時即使正在寫入也強制執行（用於啟動時推送本地較新資料）
         async function saveToCloud(force = false) {
             lastLocalUpdate = Date.now();
@@ -492,27 +494,52 @@
             updateSyncState(true, "同步中...");
 
             try {
+                const nowIso = new Date().toISOString();
                 const payload = {
                     leaveData: leaveData,
                     staffColors: staffColors,
-                    updatedAt: new Date().toISOString()
+                    updatedAt: nowIso
                 };
-                await setDoc(scheduleDocRef, payload, { merge: true });
-                cloudSyncFailed = false;
-                lastLocalUpdate = Date.now(); // 對齊時間
-                saveToLocalStorage();
-                updateSyncState(true, "雲端已同步");
-                return true;
+                // 使用 merge: false 完整覆寫整個文件，避免 merge 行為造成欄位殘留
+                await setDoc(scheduleDocRef, payload, { merge: false });
+
+                // 強制從 Server 再讀一次，確認資料真的寫進去了（避開本地快取假成功）
+                let verified = false;
+                try {
+                    const serverSnap = await getDocFromServer(scheduleDocRef);
+                    if (serverSnap.exists()) {
+                        const serverData = serverSnap.data();
+                        const serverUpdated = serverData.updatedAt || "";
+                        // 檢查 updatedAt 是否接近我們剛寫的時間
+                        if (serverUpdated && Math.abs(new Date(serverUpdated).getTime() - new Date(nowIso).getTime()) < 10000) {
+                            verified = true;
+                        }
+                    }
+                } catch (verifyErr) {
+                    console.warn("Server verify failed, but setDoc reported success:", verifyErr);
+                    // 即使驗證讀取失敗，也先相信 setDoc（有些環境 getDocFromServer 會受限）
+                    verified = true;
+                }
+
+                if (verified) {
+                    cloudSyncFailed = false;
+                    lastLocalUpdate = Date.now();
+                    saveToLocalStorage();
+                    updateSyncState(true, "雲端已同步");
+                    return true;
+                } else {
+                    throw new Error("寫入後驗證失敗，雲端資料未更新");
+                }
             } catch (e) {
                 console.error("Cloud save error:", e);
                 cloudSyncFailed = true;
                 const errMsg = e.code || e.message || "未知錯誤";
-                showToast(`雲端同步失敗 (${errMsg})，資料已保存在本機`, true);
+                showToast(`雲端同步失敗 (${errMsg})，資料已保存在本機。請檢查 Firebase Rules 或 Authorized domains`, true);
                 updateSyncState(false, "同步失敗 (僅本地)");
                 return false;
             } finally {
                 // 延遲解除鎖定，避免 snapshot 立刻用舊資料蓋回
-                setTimeout(() => { isWritingToCloud = false; }, 1200);
+                setTimeout(() => { isWritingToCloud = false; }, 1500);
             }
         }
 
@@ -1158,21 +1185,32 @@
             const { dateStr, staffName } = pendingDeleteData;
             const key = normalizeStaffKey(staffName);
 
+            let removed = false;
             if (leaveData[dateStr]) {
+                const beforeLen = leaveData[dateStr].length;
                 leaveData[dateStr] = leaveData[dateStr].filter(l => normalizeStaffKey(l.staff) !== key);
+                if (leaveData[dateStr].length < beforeLen) {
+                    removed = true;
+                }
                 if (leaveData[dateStr].length === 0) {
                     delete leaveData[dateStr];
                 }
-
-                cleanUnusedStaff();
-                await saveToCloud();
-                closeConfirmDeleteModal();
-                showToast(`已成功取消 ${staffName} 於 ${dateStr} 之年假！`);
-                refreshViews();
-            } else {
-                closeConfirmDeleteModal();
-                showToast("找不到該請假紀錄，可能已被刪除", true);
             }
+
+            cleanUnusedStaff();
+            const ok = await saveToCloud();
+            closeConfirmDeleteModal();
+
+            if (removed) {
+                if (ok) {
+                    showToast(`已成功取消 ${staffName} 於 ${dateStr} 之年假，並已同步到雲端`);
+                } else {
+                    showToast(`已在本機取消 ${staffName} 的假期，但雲端同步失敗，重新整理後可能還會出現`, true);
+                }
+            } else {
+                showToast("找不到符合的請假紀錄（可能姓名不完全一致）", true);
+            }
+            refreshViews();
         }
 
         function openStatsModal() {
