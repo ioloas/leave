@@ -32,9 +32,9 @@
             <div class="flex items-center space-x-3">
                 <i class="fa-solid fa-calendar-days text-2xl text-amber-400"></i>
                 <div>
-                    <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                    <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2 flex-wrap">
                         2027 同事年假登記系統
-                        <span id="sync-badge" class="inline-flex items-center gap-1 text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full border border-slate-700 font-normal">
+                        <span id="sync-badge" class="inline-flex items-center gap-1 text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full border border-slate-700 font-normal cursor-pointer" title="點擊可嘗試重新同步" onclick="retryCloudSync()">
                             <span class="w-1.5 h-1.5 rounded-full bg-slate-500 inline-block animate-pulse" id="sync-dot"></span>
                             <span id="sync-text">雲端連線中...</span>
                         </span>
@@ -355,6 +355,7 @@
         let isCloudConnected = false;
         let isWritingToCloud = false; // 防止寫入期間被舊 snapshot 覆蓋
         let lastLocalUpdate = 0;
+        let cloudSyncFailed = false; // 記錄最近一次寫入是否失敗
 
         // 遵循 Rule 1 的 Firestore 文件路徑
         const scheduleDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'leave_system', '2027');
@@ -405,10 +406,11 @@
                     await signInAnonymously(auth);
                 }
 
-                updateSyncState(true, "雲端已同步");
+                console.log("Firebase Auth UID:", auth.currentUser?.uid || "null");
+                updateSyncState(true, "雲端連線中...");
 
                 // 實時數據監聽 (Real-time listener)
-                onSnapshot(scheduleDocRef, (docSnap) => {
+                onSnapshot(scheduleDocRef, async (docSnap) => {
                     if (isWritingToCloud) {
                         // 正在寫入中，忽略可能的中間舊狀態，避免覆蓋剛刪除的資料
                         return;
@@ -416,20 +418,33 @@
                     if (docSnap.exists()) {
                         const data = docSnap.data();
                         const cloudUpdated = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
-                        // 只有雲端時間 >= 本地最近更新時間時才套用，避免舊資料蓋回
+
+                        // 本地有更新且比雲端新 → 優先推送本地（解決 refresh 後刪除消失的問題）
+                        if (lastLocalUpdate > cloudUpdated + 1000) {
+                            console.log("Local data newer, pushing to cloud...");
+                            updateSyncState(true, "正在同步本地變更...");
+                            await saveToCloud(true); // force push
+                            return;
+                        }
+
+                        // 雲端較新或相同 → 採用雲端
                         if (cloudUpdated >= lastLocalUpdate - 2000) {
                             leaveData = data.leaveData || {};
                             staffColors = data.staffColors || {};
+                            lastLocalUpdate = cloudUpdated;
+                            cloudSyncFailed = false;
                             saveToLocalStorage();
+                            updateSyncState(true, "雲端已同步");
                             refreshViews();
                         }
                     } else {
-                        // 如果雲端尚無紀錄，寫入初始內容
-                        saveToCloud();
+                        // 雲端尚無紀錄，寫入本地內容
+                        await saveToCloud(true);
                     }
                 }, (error) => {
                     console.warn("Firestore listener warning/error:", error);
                     updateSyncState(false, "離線模式 (Local)");
+                    cloudSyncFailed = true;
                     loadFromLocalStorage();
                     refreshViews();
                 });
@@ -437,6 +452,7 @@
             } catch (err) {
                 console.warn("Auth/Connection exception:", err);
                 updateSyncState(false, "離線模式 (Local)");
+                cloudSyncFailed = true;
                 loadFromLocalStorage();
                 refreshViews();
             }
@@ -448,8 +464,10 @@
             const textEl = document.getElementById("sync-text");
             if (dot && textEl) {
                 textEl.textContent = text;
-                if (connected) {
+                if (connected && !cloudSyncFailed) {
                     dot.className = "w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block";
+                } else if (cloudSyncFailed) {
+                    dot.className = "w-1.5 h-1.5 rounded-full bg-rose-400 inline-block";
                 } else {
                     dot.className = "w-1.5 h-1.5 rounded-full bg-amber-400 inline-block animate-ping";
                 }
@@ -457,42 +475,92 @@
         }
 
         // 寫入雲端 Firestore
-        async function saveToCloud() {
+        // force = true 時即使正在寫入也強制執行（用於啟動時推送本地較新資料）
+        async function saveToCloud(force = false) {
             lastLocalUpdate = Date.now();
-            saveToLocalStorage(); // 本地離線備份
-            if (auth.currentUser) {
-                isWritingToCloud = true;
-                try {
-                    await setDoc(scheduleDocRef, {
-                        leaveData: leaveData,
-                        staffColors: staffColors,
-                        updatedAt: new Date().toISOString()
-                    }, { merge: true });
-                } catch (e) {
-                    console.error("Cloud save error:", e);
-                    showToast("雲端同步失敗，已改為本地儲存", true);
-                } finally {
-                    // 稍等一下再解除鎖定，讓最新 snapshot 有機會進來
-                    setTimeout(() => { isWritingToCloud = false; }, 800);
-                }
+            saveToLocalStorage(); // 永遠先寫本地
+
+            if (!auth.currentUser) {
+                cloudSyncFailed = true;
+                updateSyncState(false, "未登入 (僅本地)");
+                return false;
+            }
+
+            if (isWritingToCloud && !force) return false;
+
+            isWritingToCloud = true;
+            updateSyncState(true, "同步中...");
+
+            try {
+                const payload = {
+                    leaveData: leaveData,
+                    staffColors: staffColors,
+                    updatedAt: new Date().toISOString()
+                };
+                await setDoc(scheduleDocRef, payload, { merge: true });
+                cloudSyncFailed = false;
+                lastLocalUpdate = Date.now(); // 對齊時間
+                saveToLocalStorage();
+                updateSyncState(true, "雲端已同步");
+                return true;
+            } catch (e) {
+                console.error("Cloud save error:", e);
+                cloudSyncFailed = true;
+                const errMsg = e.code || e.message || "未知錯誤";
+                showToast(`雲端同步失敗 (${errMsg})，資料已保存在本機`, true);
+                updateSyncState(false, "同步失敗 (僅本地)");
+                return false;
+            } finally {
+                // 延遲解除鎖定，避免 snapshot 立刻用舊資料蓋回
+                setTimeout(() => { isWritingToCloud = false; }, 1200);
             }
         }
 
         function saveToLocalStorage() {
-            localStorage.setItem("leaveData_2027", JSON.stringify(leaveData));
-            localStorage.setItem("staffColors_2027", JSON.stringify(staffColors));
+            try {
+                localStorage.setItem("leaveData_2027", JSON.stringify(leaveData));
+                localStorage.setItem("staffColors_2027", JSON.stringify(staffColors));
+                localStorage.setItem("lastLocalUpdate_2027", String(lastLocalUpdate));
+            } catch (e) {
+                console.warn("localStorage write failed:", e);
+            }
         }
 
         function loadFromLocalStorage() {
-            const savedData = localStorage.getItem("leaveData_2027");
-            const savedColors = localStorage.getItem("staffColors_2027");
-            if (savedData) leaveData = JSON.parse(savedData);
-            if (savedColors) staffColors = JSON.parse(savedColors);
+            try {
+                const savedData = localStorage.getItem("leaveData_2027");
+                const savedColors = localStorage.getItem("staffColors_2027");
+                const savedTs = localStorage.getItem("lastLocalUpdate_2027");
+                if (savedData) leaveData = JSON.parse(savedData);
+                if (savedColors) staffColors = JSON.parse(savedColors);
+                if (savedTs) lastLocalUpdate = parseInt(savedTs, 10) || 0;
+            } catch (e) {
+                console.warn("localStorage read failed:", e);
+            }
         }
 
         function refreshViews() {
             if (isFullYearView) renderFullYearCalendar();
             else renderCalendar();
+        }
+
+        // 手動重試雲端同步（點擊右上角狀態徽章可觸發）
+        async function retryCloudSync() {
+            if (!auth.currentUser) {
+                showToast("尚未完成身份驗證，請稍後再試或重新整理頁面", true);
+                try {
+                    await signInAnonymously(auth);
+                } catch (e) {
+                    showToast("登入失敗，請確認 Firebase 已把此網站網域加入 Authorized domains", true);
+                    return;
+                }
+            }
+            updateSyncState(true, "重新同步中...");
+            const ok = await saveToCloud(true);
+            if (ok) {
+                showToast("已成功同步到雲端！");
+                refreshViews();
+            }
         }
 
         document.addEventListener("DOMContentLoaded", () => {
@@ -1278,6 +1346,7 @@
         window.openConfirmDeleteModal = openConfirmDeleteModal;
         window.closeConfirmDeleteModal = closeConfirmDeleteModal;
         window.toggleStaffDropdown = toggleStaffDropdown;
+        window.retryCloudSync = retryCloudSync;
     </script>
 </body>
 </html>
